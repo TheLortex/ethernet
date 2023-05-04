@@ -94,10 +94,9 @@ module type S = sig
       it depending on the protocol to the callback. *)
 end
 
-module Make (N : Mirage_net.S) : sig
-  include S
 
-  val connect : N.t -> t
-  (** [connect netif] connects an ethernet layer on top of the raw
-      network device [netif]. *)
-end
+include S
+
+val connect : < sendv : Cstruct.t list -> unit; mac: Macaddr.t; mtu: int; .. > -> t
+(** [connect netif] connects an ethernet layer on top of the raw
+    network device [netif]. *)

@@ -64,15 +64,14 @@ let src = Logs.Src.create "ethernet" ~doc:"Mirage Ethernet"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make (Netif : Mirage_net.S) = struct
-  type t = { netif : Netif.t; }
+  type netif = < sendv : Cstruct.t list -> unit;  mac: Macaddr.t; mtu: int >
+  type t = { netif : netif }
 
-  let mac t = Netif.mac t.netif
-  let mtu t = Netif.mtu t.netif (* interface MTU excludes Ethernet header *)
+  let mac t = t.netif#mac
+  let mtu t = t.netif#mtu (* interface MTU excludes Ethernet header *)
 
   let input ~arpv4 ~ipv4 ~ipv6 t frame =
     let open Ethernet_packet in
-    MProf.Trace.label "ethernet.input";
     let of_interest dest =
       Macaddr.compare dest (mac t) = 0 || not (Macaddr.is_unicast dest)
     in
@@ -86,14 +85,13 @@ module Make (Netif : Mirage_net.S) = struct
     | Error s -> Log.debug (fun f -> f "dropping Ethernet frame: %s" s)
 
   let writev t ?src destination ethertype payload =
-    MProf.Trace.label "ethernet.write";
     let source = match src with None -> mac t | Some x -> x
     and eth_hdr_size = Ethernet_wire.sizeof_ethernet
     and mtu = mtu t in
     if Cstruct.lenv payload > mtu then
       raise Exceeds_mtu;
     let hdr = { Ethernet_packet.source; destination; ethertype } in
-    let header_buffer = Cstruct.create_unsafe eth_hdr_size in 
+    let header_buffer = Cstruct.create_unsafe eth_hdr_size in
     match Ethernet_packet.Marshal.into_cstruct hdr header_buffer with
     | Error msg ->
         Log.err (fun m ->
@@ -102,15 +100,14 @@ module Make (Netif : Mirage_net.S) = struct
                 buffer"
               msg);
         failwith "todo"
-    | Ok () -> Netif.writev t.netif (header_buffer::payload)
+    | Ok () ->
+      t.netif#sendv (header_buffer::payload)
 
   let connect netif =
-    MProf.Trace.label "ethernet.connect";
-    let t = { netif } in
+    let t = { netif = (netif :> netif) } in
     Log.info (fun f -> f "Connected Ethernet interface %a" Macaddr.pp (mac t));
     t
 
   let disconnect t =
     Log.info (fun f ->
         f "Disconnected Ethernet interface %a" Macaddr.pp (mac t))
-end
